@@ -1,0 +1,13 @@
+# CrewAI core sin herramientas pesadas que requieren compilación
+crewai
+python-dotenv
+requests
+beautifulsoup4
+openai
+pydantic
+gitpython
+slack-sdk
+
+# Herramientas específicas que necesitamos
+serpapi
+langchain-openai 
