@@ -463,14 +463,26 @@ class BlogAutomationCrew:
                           - What the development/trend is
                           - Why it's significant or trending now
                           - Current market context and adoption
-                          - Key implications or applications""",
+                          - Key implications or applications
+                                                                              
+                          NO BUSQUES TEMAS GENÉRICOS COMO:
+                          - "IA para PyMEs" (demasiado genérico)
+                          - "Adopción de inteligencia artificial" (muy amplio)
+                          
+                          Retorna UNA herramienta, desarrollo o tendencia CONCRETA y ESPECÍFICA.""",
             agent=agent,
-            expected_output="""A single trending AI topic relevant to SMBs with:
-                              - Topic title
-                              - Detailed description (3-4 sentences)
-                              - Why it's specifically relevant for PyMEs
-                              - Key points to cover in the blog post
-                              - Current market context or recent developments"""
+            expected_output="""UNA herramienta, desarrollo o funcionalidad ESPECÍFICA con:
+                              - Nombre exacto de la herramienta/plataforma/funcionalidad
+                              - Qué problema específico resuelve para PyMEs
+                              - Detalles técnicos concretos (precio, funciones, integraciones)
+                              - Por qué es relevante AHORA (lanzamiento reciente, update, trend)
+                              - Ejemplos específicos de uso práctico
+                              
+                              EJEMPLO DE RESPUESTA BUENA:
+                              "Zapier lanzó en enero 2025 su nueva función de AI Actions que permite crear automaciones usando lenguaje natural. Cuesta $20/mes adicionales y se integra con +5000 apps. Soluciona el problema de PyMEs que no saben programar pero necesitan automatizar workflows complejos."
+                              
+                              EJEMPLO DE RESPUESTA MALA:
+                              "La inteligencia artificial está transformando las PyMEs..." (demasiado genérico)"""
         )
     
     def create_writing_task(self, agent: Agent, research_task: Task) -> Task:
