@@ -100,29 +100,59 @@ class FileWriterTool(BaseTool):
     def _run(self, filename: str, content: str) -> str:
         """Write content to a file with JSON sanitization"""
         try:
-            # Si es un archivo JSON, sanitizar caracteres de control
+            # Si es un archivo JSON, sanitizar y arreglar formato
             if filename.endswith('.json'):
                 import json
                 import re
                 
-                # Limpiar caracteres de control comunes que causan problemas en JSON
-                # Mantener \n, \r, \t pero remover otros caracteres de control
-                sanitized = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', content)
+                print(f"🔧 FileWriter debug - Processing JSON file: {filename}")
                 
-                # Verificar que el JSON es válido antes de escribir
+                # First attempt: try to parse as-is
                 try:
-                    json.loads(sanitized)
-                    content = sanitized
-                    print(f"🔍 FileWriter debug - JSON validated and sanitized for {filename}")
+                    json.loads(content)
+                    print(f"✅ FileWriter debug - JSON is already valid!")
                 except json.JSONDecodeError as e:
-                    print(f"🚨 FileWriter debug - JSON still invalid after sanitization: {e}")
-                    # Intentar corregir comillas mal escapadas
-                    content = sanitized.replace('\\"', '"').replace('"""', '"')
+                    print(f"🚨 FileWriter debug - JSON needs repair: {e}")
+                    
+                    # Simple and effective approach: find content field and escape newlines
                     try:
+                        # Find the content field and properly escape it
+                        import re
+                        
+                        # Pattern to find content field with unescaped newlines
+                        content_pattern = r'("content":\s*")(.*?)("(?:\s*\})?$)'
+                        
+                        def escape_content(match):
+                            prefix = match.group(1)
+                            content_text = match.group(2)
+                            suffix = match.group(3)
+                            
+                            # Escape newlines, quotes, and other special chars in content
+                            escaped_content = (content_text
+                                             .replace('\\', '\\\\')  # Escape backslashes first
+                                             .replace('"', '\\"')    # Escape quotes
+                                             .replace('\n', '\\n')   # Escape newlines
+                                             .replace('\r', '\\r')   # Escape carriage returns
+                                             .replace('\t', '\\t'))  # Escape tabs
+                            
+                            return prefix + escaped_content + suffix
+                        
+                        # Apply the fix
+                        content = re.sub(content_pattern, escape_content, content, flags=re.DOTALL)
+                        
+                        # Ensure proper ending
+                        content = content.strip()
+                        if not content.endswith('}'):
+                            content += '\n}'
+                        
+                        # Test if it's valid now
                         json.loads(content)
-                        print(f"🔍 FileWriter debug - JSON fixed after quote correction")
-                    except json.JSONDecodeError:
-                        print(f"❌ FileWriter debug - Unable to fix JSON, writing as-is")
+                        print(f"✅ FileWriter debug - JSON successfully repaired with content escaping!")
+                        
+                    except Exception as e2:
+                        print(f"❌ FileWriter debug - Repair failed: {e2}")
+                        # Keep original content, validation will catch it
+                        pass
             
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -485,11 +515,13 @@ class BlogAutomationCrew:
                            CRITICAL INSTRUCTION: After creating the JSON content, you MUST save it to a file using the file_writer_tool.
                            Use a filename based on the slug: "[slug].json" (e.g., "automatizacion-precios-ia.json")
                            
-                           IMPORTANT JSON FORMATTING:
-                           - Ensure all strings are properly escaped
+                           CRITICAL JSON FORMATTING REQUIREMENTS:
+                           - ALWAYS end with a complete, valid JSON structure
+                           - Ensure all strings are properly escaped and closed with quotes
                            - Use double quotes for JSON strings, not single quotes
                            - Avoid control characters in content (use \\n for line breaks)
-                           - Test JSON validity before saving if possible""",
+                           - MUST end with closing quote for content field and closing brace }}
+                           - Verify the JSON is complete before considering the task done""",
             agent=agent,
             context=[research_task],  # ← El agente writer recibe el resultado del research
             expected_output="Complete blog post in valid JSON format saved to a file using the file_writer_tool"
