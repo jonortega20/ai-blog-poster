@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Blog Automation System using CrewAI
-Automatically creates, commits and deploys weekly blog posts
+Automatically creates, commits and deploys blog posts weekly
 """
 
 import os
@@ -17,7 +17,6 @@ import json
 import requests
 from typing import Type
 from pydantic import BaseModel, Field
-import traceback
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -99,8 +98,32 @@ class FileWriterTool(BaseTool):
     args_schema: Type[BaseModel] = FileWriterInput
     
     def _run(self, filename: str, content: str) -> str:
-        """Write content to a file"""
+        """Write content to a file with JSON sanitization"""
         try:
+            # Si es un archivo JSON, sanitizar caracteres de control
+            if filename.endswith('.json'):
+                import json
+                import re
+                
+                # Limpiar caracteres de control comunes que causan problemas en JSON
+                # Mantener \n, \r, \t pero remover otros caracteres de control
+                sanitized = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', content)
+                
+                # Verificar que el JSON es válido antes de escribir
+                try:
+                    json.loads(sanitized)
+                    content = sanitized
+                    print(f"🔍 FileWriter debug - JSON validated and sanitized for {filename}")
+                except json.JSONDecodeError as e:
+                    print(f"🚨 FileWriter debug - JSON still invalid after sanitization: {e}")
+                    # Intentar corregir comillas mal escapadas
+                    content = sanitized.replace('\\"', '"').replace('"""', '"')
+                    try:
+                        json.loads(content)
+                        print(f"🔍 FileWriter debug - JSON fixed after quote correction")
+                    except json.JSONDecodeError:
+                        print(f"❌ FileWriter debug - Unable to fix JSON, writing as-is")
+            
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
             return f"Successfully wrote content to {filename}"
@@ -454,7 +477,13 @@ class BlogAutomationCrew:
                            actionable information about AI applications that can realistically be implemented in their business.
                            
                            CRITICAL INSTRUCTION: After creating the JSON content, you MUST save it to a file using the file_writer_tool.
-                           Use a filename based on the slug: "[slug].json" (e.g., "automatizacion-precios-ia.json")""",
+                           Use a filename based on the slug: "[slug].json" (e.g., "automatizacion-precios-ia.json")
+                           
+                           IMPORTANT JSON FORMATTING:
+                           - Ensure all strings are properly escaped
+                           - Use double quotes for JSON strings, not single quotes
+                           - Avoid control characters in content (use \\n for line breaks)
+                           - Test JSON validity before saving if possible""",
             agent=agent,
             context=[research_task],  # ← El agente writer recibe el resultado del research
             expected_output="Complete blog post in valid JSON format saved to a file using the file_writer_tool"
