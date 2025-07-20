@@ -110,29 +110,51 @@ class FileWriterTool(BaseTool):
 class GitCommitInput(BaseModel):
     """Input for git commit tool"""
     message: str = Field(description="Commit message")
-    files: str = Field(default=".", description="Files to add (default: all)")
+    files: str = Field(default="blog_posts.json", description="Files to add (default: blog_posts.json)")
 
 class GitCommitTool(BaseTool):
-    """Tool for Git operations"""
+    """Tool for Git operations with [blog-bot] prefix"""
     name: str = "git_commit"
-    description: str = "Add files, commit and push to Git repository"
+    description: str = "Add blog_posts.json, commit with [blog-bot] prefix and push to Git repository"
     args_schema: Type[BaseModel] = GitCommitInput
     
-    def _run(self, message: str, files: str = ".") -> str:
+    def _run(self, message: str, files: str = "blog_posts.json") -> str:
         """Execute git operations"""
         try:
+            # Usar directorio actual
+            current_dir = os.getcwd()
+            
+            # Agregar prefijo [blog-bot] al mensaje
+            if not message.startswith("[blog-bot]"):
+                message = f"[blog-bot] {message}"
+            
+            print(f"🔍 Git debug - Working directory: {current_dir}")
+            print(f"🔍 Git debug - Files to add: {files}")
+            print(f"🔍 Git debug - Commit message: {message}")
+            
             # Add files
             result = subprocess.run(["git", "add", files], capture_output=True, text=True, cwd=".")
             if result.returncode != 0:
                 return f"Error adding files: {result.stderr}"
             
+            # Verificar que hay cambios para commit
+            result = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=".")
+            if not result.stdout.strip():
+                return "✅ No changes to commit - files already up to date"
+            
+            print(f"🔍 Git debug - Changes found: {result.stdout.strip()}")
+            
             # Commit
             result = subprocess.run(["git", "commit", "-m", message], capture_output=True, text=True, cwd=".")
             if result.returncode != 0:
-                return f"Error committing: {result.stderr}"
+                error_details = result.stderr.strip() or result.stdout.strip() or "Sin detalles de error"
+                print(f"🔍 Git commit debug - stdout: {result.stdout}")
+                print(f"🔍 Git commit debug - stderr: {result.stderr}")
+                print(f"🔍 Git commit debug - returncode: {result.returncode}")
+                return f"Error committing: {error_details}"
             
             # Push
-            result = subprocess.run(["git", "push"], capture_output=True, text=True, cwd=".")
+            result = subprocess.run(["git", "push", "blog-poster"], capture_output=True, text=True, cwd=".")
             if result.returncode != 0:
                 return f"Error pushing: {result.stderr}"
             
@@ -182,53 +204,54 @@ class BlogDeploymentInput(BaseModel):
     blog_file: str = Field(description="Path to the blog JSON file")
 
 class BlogDeploymentTool(BaseTool):
-    """Tool for copying blog post to frontend and updating blogData.ts"""
+    """Tool for deploying blog post to JSON collection and cleanup"""
     name: str = "blog_deployment"
-    description: str = "Deploy blog post to frontend directory and update blogData.ts"
+    description: str = "Deploy blog post to blog_posts.json collection and remove individual file"
     args_schema: Type[BaseModel] = BlogDeploymentInput
     
     def _run(self, blog_file: str) -> str:
-        """Deploy blog post to frontend"""
+        """Deploy blog post to current directory"""
         try:
             # Read blog post
             with open(blog_file, 'r', encoding='utf-8') as f:
                 blog_data = json.load(f)
             
-            # Get paths from environment
-            repo_path = os.getenv("REPO_PATH", "../frontend/lib/")
-            blog_data_file = os.getenv("BLOG_POSTS_FILE", "blogData.ts")
+            # Create a simple blog posts collection in current directory
+            blog_collection_file = "blog_posts.json"
+            current_dir = os.getcwd()
             
-            # Ensure directory exists
-            os.makedirs(repo_path, exist_ok=True)
+            print(f"🔍 Deploy debug - Working directory: {current_dir}")
+            print(f"🔍 Deploy debug - Collection file: {blog_collection_file}")
             
-            # Path to blogData.ts
-            blog_data_path = os.path.join(repo_path, blog_data_file)
-            
-            # Create or update blogData.ts
-            if os.path.exists(blog_data_path):
-                # Read existing file
-                with open(blog_data_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # Extract existing posts (simple approach)
-                if "export const blogPosts" in content:
-                    # Add to existing array
-                    # This is a simplified implementation
-                    new_entry = json.dumps(blog_data, indent=2, ensure_ascii=False)
-                    # Insert before the closing bracket
-                    content = content.replace("];", f",\n  {new_entry}\n];")
-                else:
-                    # Create new file
-                    content = f"export const blogPosts = [\n  {json.dumps(blog_data, indent=2, ensure_ascii=False)}\n];"
+            # Load existing posts or create new collection
+            if os.path.exists(blog_collection_file):
+                with open(blog_collection_file, 'r', encoding='utf-8') as f:
+                    try:
+                        existing_posts = json.load(f)
+                        if not isinstance(existing_posts, list):
+                            existing_posts = []
+                    except:
+                        existing_posts = []
             else:
-                # Create new file
-                content = f"export const blogPosts = [\n  {json.dumps(blog_data, indent=2, ensure_ascii=False)}\n];"
+                existing_posts = []
             
-            # Write updated file
-            with open(blog_data_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            # Add new post to collection
+            existing_posts.append(blog_data)
             
-            return f"✅ Blog post deployed to {blog_data_path}"
+            # Write updated collection
+            with open(blog_collection_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_posts, f, indent=2, ensure_ascii=False)
+            
+            print(f"🔍 Deploy debug - Posts in collection: {len(existing_posts)}")
+            
+            # Remove individual blog file after adding to collection
+            try:
+                os.remove(blog_file)
+                print(f"🔍 Deploy debug - Removed individual file: {blog_file}")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not remove individual file {blog_file}: {e}")
+            
+            return f"✅ Blog post deployed to {blog_collection_file}, individual file cleaned up"
         except Exception as e:
             return f"Error deploying blog post: {str(e)}"
 
@@ -481,14 +504,15 @@ class BlogAutomationCrew:
         return Task(
             description=f"""Handle technical operations for blog post deployment:
                           
-                          1. COPY BLOG POST TO FRONTEND:
-                             - Copy the generated JSON blog post '{blog_file}' to the frontend directory
-                             - Update blogData.ts with the new post entry
-                             - Ensure proper TypeScript formatting
+                          1. DEPLOY BLOG POST:
+                             - Deploy the generated JSON blog post '{blog_file}' to blog_posts.json collection
+                             - Add new post entry to the collection
+                             - Remove individual JSON file after adding to collection (cleanup)
+                             - Ensure proper JSON formatting
                           
                           2. GIT OPERATIONS:
-                             - Add the new blog post files to git
-                             - Create commit with descriptive message
+                             - Add only blog_posts.json to git (not individual files)
+                             - Create commit with "[blog-bot]" prefix + descriptive message
                              - Push changes to repository
                           
                           3. SLACK NOTIFICATION:
@@ -496,7 +520,7 @@ class BlogAutomationCrew:
                              - Include blog post title and summary
                              - Provide link to the new post
                           
-                          CRITICAL: Use the exact file path '{blog_file}' for deployment.
+                          CRITICAL: Use the exact file path '{blog_file}' for deployment. Only commit blog_posts.json.
                           If any operation fails, report the error and stop execution.""",
             agent=agent,
             context=[writing_task],
@@ -552,6 +576,43 @@ class BlogAutomationCrew:
         
         return {"valid": len(errors) == 0, "errors": errors}
 
+    def list_slack_channels(self):
+        """Lista todos los canales accesibles para el bot"""
+        try:
+            from slack_sdk import WebClient
+            
+            slack_token = os.getenv("SLACK_BOT_TOKEN")
+            if not slack_token:
+                print("❌ SLACK_BOT_TOKEN no configurado")
+                return []
+                
+            client = WebClient(token=slack_token)
+            
+            print("🔍 Listando canales accesibles para el bot...")
+            
+            # Listar canales públicos
+            public_channels = client.conversations_list(types="public_channel")
+            print("📢 Canales públicos:")
+            for channel in public_channels["channels"]:
+                is_member = channel.get("is_member", False)
+                print(f"  - #{channel['name']} (ID: {channel['id']}, member: {is_member})")
+            
+            # Listar canales privados donde el bot es miembro
+            private_channels = client.conversations_list(types="private_channel")
+            print("🔒 Canales privados donde soy miembro:")
+            for channel in private_channels["channels"]:
+                print(f"  - #{channel['name']} (ID: {channel['id']})")
+                
+            # Listar DMs
+            dms = client.conversations_list(types="im")
+            print(f"💬 Mensajes directos: {len(dms['channels'])} disponibles")
+            
+            return public_channels["channels"] + private_channels["channels"]
+            
+        except Exception as e:
+            print(f"❌ Error listando canales Slack: {e}")
+            return []
+
     def send_slack_error(self, errors: list):
         """Envía errores críticos a Slack"""
         try:
@@ -564,6 +625,9 @@ class BlogAutomationCrew:
                 channel = f"#{channel}"
             
             print(f"🔍 Debug Slack: token={slack_token[:10] if slack_token else 'None'}..., channel='{channel}'")
+            
+            # Listar canales disponibles para debug
+            self.list_slack_channels()
             
             if not slack_token:
                 print("❌ SLACK_BOT_TOKEN no configurado")
@@ -597,6 +661,11 @@ class BlogAutomationCrew:
             # Añadir # si no está presente
             if channel and not channel.startswith('#'):
                 channel = f"#{channel}"
+            
+            print(f"🔍 Debug Slack Success: token={slack_token[:10] if slack_token else 'None'}..., channel='{channel}'")
+            
+            # Listar canales disponibles para debug
+            self.list_slack_channels()
             
             if not slack_token:
                 print("❌ SLACK_BOT_TOKEN no configurado")
