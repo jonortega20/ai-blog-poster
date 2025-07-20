@@ -99,14 +99,16 @@ class FileWriterTool(BaseTool):
     args_schema: Type[BaseModel] = FileWriterInput
     
     def _run(self, filename: str, content: str) -> str:
-        """Write content to a file with JSON sanitization"""
+        """Write content to a file with ADVANCED JSON sanitization"""
         try:
             # Si es un archivo JSON, sanitizar y arreglar formato
             if filename.endswith('.json'):
                 import json
                 import re
+                import string
                 
                 print(f"🔧 FileWriter debug - Processing JSON file: {filename}")
+                print(f"🔧 Content preview: {content[:200]}...")
                 
                 # First attempt: try to parse as-is
                 try:
@@ -115,51 +117,156 @@ class FileWriterTool(BaseTool):
                 except json.JSONDecodeError as e:
                     print(f"🚨 FileWriter debug - JSON needs repair: {e}")
                     
-                    # Simple and effective approach: find content field and escape newlines
-                    try:
-                        # Find the content field and properly escape it
-                        import re
-                        
-                        # Pattern to find content field with unescaped newlines
-                        content_pattern = r'("content":\s*")(.*?)("(?:\s*\})?$)'
-                        
-                        def escape_content(match):
-                            prefix = match.group(1)
-                            content_text = match.group(2)
-                            suffix = match.group(3)
-                            
-                            # Escape newlines, quotes, and other special chars in content
-                            escaped_content = (content_text
-                                             .replace('\\', '\\\\')  # Escape backslashes first
-                                             .replace('"', '\\"')    # Escape quotes
-                                             .replace('\n', '\\n')   # Escape newlines
-                                             .replace('\r', '\\r')   # Escape carriage returns
-                                             .replace('\t', '\\t'))  # Escape tabs
-                            
-                            return prefix + escaped_content + suffix
-                        
-                        # Apply the fix
-                        content = re.sub(content_pattern, escape_content, content, flags=re.DOTALL)
-                        
-                        # Ensure proper ending
-                        content = content.strip()
-                        if not content.endswith('}'):
-                            content += '\n}'
-                        
-                        # Test if it's valid now
-                        json.loads(content)
-                        print(f"✅ FileWriter debug - JSON successfully repaired with content escaping!")
-                        
-                    except Exception as e2:
-                        print(f"❌ FileWriter debug - Repair failed: {e2}")
-                        # Keep original content, validation will catch it
-                        pass
+                    # MÚLTIPLES ESTRATEGIAS DE REPARACIÓN SECUENCIAL
+                    strategies = [
+                        ("Control Characters", self._remove_control_chars),
+                        ("Content Field Escaping", self._escape_content_field),  
+                        ("Quote Fixing", self._fix_quotes),
+                        ("Structure Repair", self._fix_structure),
+                        ("Emergency Rebuild", self._emergency_rebuild)
+                    ]
+                    
+                    for strategy_name, repair_func in strategies:
+                        try:
+                            print(f"🔧 Intentando: {strategy_name}...")
+                            repaired = repair_func(content)
+                            json.loads(repaired)  # Test validity
+                            print(f"✅ {strategy_name} exitosa!")
+                            content = repaired
+                            break
+                        except Exception as repair_err:
+                            print(f"❌ {strategy_name} falló: {repair_err}")
+                            continue
+                    else:
+                        print(f"🚨 Todas las reparaciones fallaron, guardando como está para debug")
             
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
             return f"Successfully wrote content to {filename}"
         except Exception as e:
             return f"Error writing to file: {str(e)}"
+    
+    def _remove_control_chars(self, content: str) -> str:
+        """Remove all control characters except allowed ones"""
+        import string
+        # Keep only printable characters + specific whitespace
+        allowed = set(string.printable)
+        cleaned = ''.join(char for char in content if char in allowed)
+        return cleaned
+    
+    def _escape_content_field(self, content: str) -> str:
+        """Escape the content field specifically"""
+        import re
+        
+        # More flexible pattern for content field
+        pattern = r'("content":\s*")(.*?)("(?:\s*[,}])?)'
+        
+        def escape_func(match):
+            prefix = match.group(1)
+            text = match.group(2)
+            suffix = match.group(3)
+            
+            # Aggressive escaping
+            escaped = (text.replace('\\', '\\\\')    # Escape backslashes
+                          .replace('"', '\\"')       # Escape quotes
+                          .replace('\n', '\\n')      # Escape newlines
+                          .replace('\r', '\\r')      # Escape carriage returns  
+                          .replace('\t', '\\t')      # Escape tabs
+                          .replace('\b', '\\b')      # Escape backspace
+                          .replace('\f', '\\f'))     # Escape form feed
+            
+            return prefix + escaped + suffix
+        
+        return re.sub(pattern, escape_func, content, flags=re.DOTALL)
+    
+    def _fix_quotes(self, content: str) -> str:
+        """Fix unescaped quotes and missing commas"""
+        lines = content.split('\n')
+        fixed = []
+        
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            
+            # Add missing commas
+            if (stripped and 
+                not stripped.endswith(',') and 
+                not stripped.endswith('{') and 
+                not stripped.endswith('}') and
+                i < len(lines) - 1):
+                next_stripped = lines[i + 1].strip()
+                if next_stripped and not next_stripped.startswith('}'):
+                    line = line.rstrip() + ','
+            
+            fixed.append(line)
+        
+        return '\n'.join(fixed)
+    
+    def _fix_structure(self, content: str) -> str:
+        """Fix basic JSON structure"""
+        content = content.strip()
+        
+        # Ensure proper brackets
+        if not content.startswith('{'):
+            content = '{' + content
+        if not content.endswith('}'):
+            content = content.rstrip(',') + '}'
+        
+        return content
+    
+    def _emergency_rebuild(self, content: str) -> str:
+        """Last resort: rebuild JSON from extracted values"""
+        import re
+        import json
+        from datetime import datetime
+        
+        try:
+            # Extract key fields
+            title = self._extract_field(content, 'title') or "Artículo generado por IA"
+            date = self._extract_field(content, 'date') or datetime.now().strftime("%d/%m/%Y")  
+            author = self._extract_field(content, 'author') or "AI Blog Bot"
+            summary = self._extract_field(content, 'summary') or "Resumen no disponible"
+            content_text = self._extract_field(content, 'content') or "Contenido no disponible"
+            
+            # Clean and escape content
+            content_text = (content_text.replace('\n', ' ')
+                                       .replace('\r', ' ')
+                                       .replace('\t', ' ')
+                                       .replace('"', "'")[:2000])  # Limit length
+            
+            # Generate slug
+            slug = (title.lower()
+                        .replace(' ', '-')
+                        .replace('í', 'i')
+                        .replace('ó', 'o')
+                        .replace('á', 'a')
+                        .replace('é', 'e')
+                        .replace('ú', 'u')[:50])
+            
+            # Build emergency JSON
+            emergency = {
+                "label": "AI para PyMEs",
+                "title": title,
+                "date": date,
+                "author": author,
+                "readTime": "5 MIN",
+                "summary": summary,
+                "coverImage": f"/images/blog/{slug}.jpeg",
+                "slug": slug,
+                "content": content_text
+            }
+            
+            return json.dumps(emergency, ensure_ascii=False, indent=2)
+            
+        except Exception as e:
+            print(f"Emergency rebuild failed: {e}")
+            return content
+    
+    def _extract_field(self, content: str, field: str) -> str:
+        """Extract a field value from potentially broken JSON"""
+        import re
+        pattern = rf'"{field}":\s*"([^"]*)"'
+        match = re.search(pattern, content)
+        return match.group(1) if match else None
 
 class GitCommitInput(BaseModel):
     """Input for git commit tool"""
@@ -428,7 +535,9 @@ class BlogAutomationCrew:
                     Ensure smooth automation of the publishing pipeline.""",
             backstory="""You are a DevOps specialist with expertise in automated deployment pipelines, 
                         Git operations, and integration with communication tools like Slack. You ensure 
-                        that the technical aspects of content publishing work flawlessly.""",
+                        that the technical aspects of content publishing work flawlessly.
+                        
+                        CRITICAL: Always use Slack channel ID C096JQVRXPG instead of channel name #blog-posts for notifications.""",
             tools=[self.blog_deployment_tool, self.git_commit_tool, self.slack_notification_tool],
             verbose=True,
             allow_delegation=False,
@@ -536,8 +645,14 @@ class BlogAutomationCrew:
                            but have concerns about cost, complexity, implementation time, and ROI. They need practical, 
                            actionable information about AI applications that can realistically be implemented in their business.
                            
-                           CRITICAL INSTRUCTION: After creating the JSON content, you MUST save it to a file using the file_writer_tool.
-                           Use a filename based on the slug: "[slug].json" (e.g., "automatizacion-precios-ia.json")
+                           CRITICAL INSTRUCTION: You MUST use the file_writer tool to save the JSON content to a file.
+                            
+                           MANDATORY STEPS:
+                           1. Create the complete JSON content
+                           2. IMMEDIATELY call file_writer tool with filename: "[slug].json"
+                           3. Do NOT provide the JSON as final answer without saving it first
+                           
+                           Example filename: "automatizacion-inteligente-pymes.json"
                            
                            CRITICAL JSON FORMATTING REQUIREMENTS:
                            - ALWAYS end with a complete, valid JSON structure
@@ -607,7 +722,7 @@ class BlogAutomationCrew:
                              - Push changes to repository
                           
                           3. SLACK NOTIFICATION:
-                             - Send success notification to Slack channel
+                             - Send success notification to Slack channel using ID: C096JQVRXPG
                           
                           CRITICAL: Use the exact file path '{blog_file}' for deployment. Only commit blog_posts.json.
                           If any operation fails, report the error and stop execution.""",
@@ -872,8 +987,8 @@ class BlogAutomationCrew:
                 # SAVE FILE FOR DEBUGGING instead of deleting
                 debug_file = f"DEBUG_{latest_file}"
                 import shutil
-                shutil.copy2(latest_file, debug_file)
-                print(f"🔍 Archivo copiado para debug: {debug_file}")
+                shutil.move(latest_file, debug_file)
+                print(f"🔍 Archivo renombrado para debug: {debug_file}")
                 
                 # If it's a JSON control character issue, try manual fix
                 if any("control character" in error for error in validation["errors"]):
