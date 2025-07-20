@@ -206,19 +206,25 @@ class SlackNotificationTool(BaseTool):
                 return "❌ SLACK_BOT_TOKEN not configured"
             
             slack_channel = channel or os.getenv("SLACK_CHANNEL", "blog-posts")
-            # Añadir # si no está presente
-            if slack_channel and not slack_channel.startswith('#'):
+            
+            # Use the channel ID that we know works from our debug logs
+            if slack_channel in ["blog-posts", "#blog-posts"]:
+                slack_channel = "C096JQVRXPG"  # Direct channel ID from logs
+            elif not slack_channel.startswith('#') and not slack_channel.startswith('C'):
                 slack_channel = f"#{slack_channel}"
             
             client = WebClient(token=slack_token)
             
-            client.chat_postMessage(
+            response = client.chat_postMessage(
                 channel=slack_channel,
                 text=message,
                 username="Blog Automation"
             )
             
-            return f"✅ Notification sent to {slack_channel}"
+            if response.get("ok"):
+                return f"✅ Notification sent to {slack_channel}"
+            else:
+                return f"❌ Slack API error: {response.get('error', 'Unknown error')}"
         except Exception as e:
             return f"Error sending Slack notification: {str(e)}"
 
@@ -546,8 +552,6 @@ class BlogAutomationCrew:
                           
                           3. SLACK NOTIFICATION:
                              - Send success notification to Slack channel
-                             - Include blog post title and summary
-                             - Provide link to the new post
                           
                           CRITICAL: Use the exact file path '{blog_file}' for deployment. Only commit blog_posts.json.
                           If any operation fails, report the error and stop execution.""",
@@ -567,8 +571,25 @@ class BlogAutomationCrew:
         errors = []
         
         try:
+            # Debug the problematic character
+            if len(blog_content) > 688:
+                char_at_688 = blog_content[688]
+                print(f"🔍 Debug - Character at position 688: '{char_at_688}' (ord: {ord(char_at_688)})")
+                
+                # Show context around position 688
+                start = max(0, 688-20)
+                end = min(len(blog_content), 688+20)
+                context = blog_content[start:end]
+                print(f"🔍 Debug - Context around 688: {repr(context)}")
+            
+            # More aggressive cleaning
+            import re
+            # Remove ALL control characters except \n, \r, \t
+            cleaned_content = ''.join(char for char in blog_content if ord(char) >= 32 or char in '\n\r\t')
+            print(f"🔍 Validation debug - JSON cleaned, original length: {len(blog_content)}, cleaned: {len(cleaned_content)}")
+            
             # Parse JSON
-            blog_data = json.loads(blog_content)
+            blog_data = json.loads(cleaned_content)
             
             # VALIDACIÓN 1: Campos obligatorios
             required_fields = ["label", "title", "date", "author", "readTime", "summary", "coverImage", "slug", "content"]
@@ -603,7 +624,13 @@ class BlogAutomationCrew:
         except Exception as e:
             errors.append(f"❌ CRÍTICO: Error de validación - {str(e)}")
         
-        return {"valid": len(errors) == 0, "errors": errors}
+        result = {"valid": len(errors) == 0, "errors": errors}
+        
+        # Include cleaned content if successful and different from original
+        if result["valid"] and 'cleaned_content' in locals() and cleaned_content != blog_content:
+            result["cleaned_content"] = cleaned_content
+            
+        return result
 
     def list_slack_channels(self):
         """Lista todos los canales accesibles para el bot"""
@@ -702,17 +729,10 @@ class BlogAutomationCrew:
             
             client = WebClient(token=slack_token)
             
-            success_message = f"""🎉 **NUEVO BLOG POST PUBLICADO**
-
-📰 **Título**: {blog_data.get('title', 'Sin título')}
-📅 **Fecha**: {blog_data.get('date', 'N/A')}
-⏱️ **Tiempo de lectura**: {blog_data.get('readTime', 'N/A')}
-📄 **Slug**: {blog_data.get('slug', 'N/A')}
-
-📝 **Resumen**: {blog_data.get('summary', 'Sin resumen')}
-
-✅ **Estado**: Validado, deployado y commitado exitosamente
-🗂️ **Archivo**: {latest_file}"""
+            success_message = f"""🎉 NUEVO BLOG POST PUBLICADO - {blog_data.get('date', 'N/A')}
+📰 Título: {blog_data.get('title', 'Sin título')}
+🔗 Link: wrappers.es/blog/{blog_data.get('slug', 'sin-slug')}
+📝 Resumen: {blog_data.get('summary', 'Sin resumen')}"""
             
             client.chat_postMessage(
                 channel=channel,
@@ -765,12 +785,13 @@ class BlogAutomationCrew:
             # Leer el archivo generado para validación
             # Encontrar el archivo JSON generado más reciente
             json_files = [f for f in os.listdir('.') if f.endswith('.json')]
-            # Filtrar archivos de configuración comunes
-            json_files = [f for f in json_files if not f.startswith('.') and 'package' not in f.lower()]
+            # Filtrar archivos de configuración comunes Y blog_posts.json (colección)
+            json_files = [f for f in json_files if not f.startswith('.') and 'package' not in f.lower() and f != 'blog_posts.json']
             
             if not json_files:
                 print("🔍 Debug: Archivos en directorio:", os.listdir('.'))
-                self.send_slack_error(["❌ No se encontró archivo JSON generado"])
+                print("🔍 Debug: Archivos JSON encontrados antes de filtrar:", [f for f in os.listdir('.') if f.endswith('.json')])
+                self.send_slack_error(["❌ No se encontró archivo JSON generado (excluyendo blog_posts.json)"])
                 return {"status": "error", "message": "No se encontró archivo JSON generado"}
             
             latest_file = max(json_files, key=os.path.getctime)
@@ -781,23 +802,65 @@ class BlogAutomationCrew:
             # VALIDACIÓN CRÍTICA
             validation = self.validate_blog_post_strict(blog_content, str(content_result))
             
+            # Si la validación pasó y el contenido fue limpiado, reescribir el archivo
+            if validation["valid"] and validation.get("cleaned_content"):
+                with open(latest_file, 'w', encoding='utf-8') as f:
+                    f.write(validation["cleaned_content"])
+                print(f"🔧 Archivo limpiado y reescrito: {latest_file}")
+            
             if not validation["valid"]:
                 print(f"\n🚨 VALIDACIÓN FALLÓ - {len(validation['errors'])} errores críticos:")
                 for error in validation["errors"]:
                     print(f"  {error}")
                 
-                # Enviar errores a Slack
-                self.send_slack_error(validation["errors"])
+                # SAVE FILE FOR DEBUGGING instead of deleting
+                debug_file = f"DEBUG_{latest_file}"
+                import shutil
+                shutil.copy2(latest_file, debug_file)
+                print(f"🔍 Archivo copiado para debug: {debug_file}")
                 
-                # Eliminar archivo defectuoso
-                os.remove(latest_file)
-                print(f"🗑️ Archivo defectuoso eliminado: {latest_file}")
+                # If it's a JSON control character issue, try manual fix
+                if any("control character" in error for error in validation["errors"]):
+                    print(f"🔧 Intentando reparación manual del JSON...")
+                    try:
+                        with open(latest_file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        # VERY aggressive cleaning - keep only printable + newlines
+                        import string
+                        cleaned = ''.join(char for char in content if char in string.printable)
+                        
+                        with open(latest_file, 'w', encoding='utf-8') as f:
+                            f.write(cleaned)
+                            
+                        print(f"🔧 Archivo reparado, reintentando validación...")
+                        validation_retry = self.validate_blog_post_strict(cleaned, str(content_result))
+                        
+                        if validation_retry["valid"]:
+                            print(f"✅ Reparación exitosa!")
+                            validation = validation_retry  # Use the successful validation
+                        else:
+                            print(f"❌ Reparación falló: {validation_retry['errors']}")
+                            # Don't delete, keep for manual inspection
+                            self.send_slack_error(validation["errors"])
+                            return {
+                                "status": "error", 
+                                "message": "Blog post rechazado por errores críticos - archivo preservado para debug",
+                                "errors": validation["errors"],
+                                "debug_file": debug_file
+                            }
+                    except Exception as e:
+                        print(f"❌ Error en reparación: {e}")
                 
-                return {
-                    "status": "error", 
-                    "message": "Blog post rechazado por errores críticos",
-                    "errors": validation["errors"]
-                }
+                if not validation.get("fixed", False):
+                    # Enviar errores a Slack pero NO eliminar archivo
+                    self.send_slack_error(validation["errors"])
+                    return {
+                        "status": "error", 
+                        "message": "Blog post rechazado por errores críticos - archivo preservado para debug",
+                        "errors": validation["errors"],
+                        "debug_file": debug_file
+                    }
             
             print("✅ TODAS LAS VALIDACIONES PASARON - Procediendo con commit...")
             
