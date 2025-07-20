@@ -6,6 +6,7 @@ Automatically creates, commits and deploys blog posts weekly
 
 import os
 import json
+import random
 import re
 import subprocess
 from datetime import datetime
@@ -436,19 +437,28 @@ class BlogAutomationCrew:
     
     def create_research_task(self, agent: Agent) -> Task:
         """
-        Tarea de investigación: busca temas trending
+        Tarea de investigación: busca temas trending con VARIEDAD
         """
+        import random
+        
+        # ROTAR TEMAS para evitar repetición
+        topic_angles = [
+            "Busca las últimas innovaciones en IA que resuelvan problemas específicos de PyMEs.",
+            "Investiga tecnologías emergentes como agentes IA, MCP (Model Context Protocol), RAG avanzado, o AI wrappers que permitan a PyMEs competir con grandes empresas sin grandes inversiones",
+            "Explora herramientas no-code y automation que transformen emprendedores agotados en CEOs eficientes: Zapier vs Make vs n8n...",
+            "Busca soluciones específicas de marketing con IA que generen ROI inmediato: automación de email marketing, lead generation con IA, nuevas funciones de Meta/Google Ads, CRM inteligentes económicos",
+            "Investiga cómo PyMEs pueden usar IA para ser más rentables: herramientas de análisis de datos gratuitas, dashboards automáticos, Business Intelligence accesible, métricas que importen",
+            "Tendencias de IA generativa para el marketing y las agencias de publicidad digital",
+            "Explora tecnologías que solucionen el caos operativo de pequeñas empresas: project management con IA, comunicación interna automática, gestión de equipos remotos, ERP para PyMEs",
+            "Investiga tendencias técnicas específicas pero aplicables: integración de APIs, database querying con IA, workflow automation, herramientas de productividad que realmente funcionen para equipos pequeños"
+        ]
+        
+        # Seleccionar ángulo aleatorio
+        selected_angle = random.choice(topic_angles)
+        
         return Task(
-            description="""Search for current AI trends, developments, and emerging technologies that would be highly relevant 
-                          for small and medium businesses in Spanish-speaking markets. Focus on:
-                          
-                          1. Practical AI applications for business processes
-                          2. Cost-effective AI solutions for SMBs
-                          3. Common concerns about AI implementation (security, cost, complexity)
-                          4. Recent developments in business AI tools, RAG systems, AI agents, or AI wrappers
-                          
-                          Look for topics that represent significant developments or shifts in the AI landscape.
-                          
+            description=f"""{selected_angle}
+
                           Return 1 specific trending AI topic with detailed information about:
                           - What the development/trend is
                           - Why it's significant or trending now
@@ -468,6 +478,8 @@ class BlogAutomationCrew:
         Tarea de escritura: crea el blog post en formato JSON exacto
         """
         current_date = datetime.now().strftime("%d/%m/%Y")
+        author = random.choice(["Jon Ortega", "Leire Legarreta", "Elbio Nielsen"])
+        readTime = random.choice(["4 MIN", "5 MIN", "6 MIN"])
         
         return Task(
             description=f"""Take the general AI trend/development from the research and adapt it specifically for PyMEs 
@@ -478,8 +490,8 @@ class BlogAutomationCrew:
                                "label": "IA para tu PyME",
                                "title": "[Compelling title about the chosen topic]",
                                "date": "{current_date}",
-                               "author": "Jon Ortega",
-                               "readTime": "5 MIN", 
+                               "author": "{author}",
+                               "readTime": "{readTime}",
                                "summary": "[2-3 sentence summary that hooks the reader]",
                                "coverImage": "/images/blog/[slug-based-filename].jpeg",
                                "slug": "[url-friendly-slug]",
@@ -490,9 +502,9 @@ class BlogAutomationCrew:
                            - Content must be 800-1200 words
                            - Use a conversational but professional tone specifically for PyME audiences
                            - Transform the general AI topic into specific PyME applications and benefits
+                           - Speak about how Wrappers.es adresses that problem: we provide long context windows for company files, infinite memory and vertical agents
                            - Address common PyME concerns: cost, complexity, implementation, ROI
-                           - Include practical examples with SPECIFIC company names and sectors (e.g., "TechSoluciones", "Comercial López", "Clínica San Rafael")
-                           - Incorporate relevant AI keywords naturally: contexto, RAG, agentes, wrappers, IA, LLMs
+                           - Incorporate relevant AI keywords naturally: contexto, RAG, agentes, wrappers, IA, LLMs, agentes verticales, memoria, ventana de contexto, etc.
                            - Use proper markdown formatting in content field
                            - Generate a URL-friendly slug
                            - CRITICAL: coverImage path must be "/images/blog/[slug].jpeg" where [slug] is the exact slug generated
