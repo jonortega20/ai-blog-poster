@@ -12,7 +12,7 @@ def test_environment():
     
     load_dotenv()
     
-    required_vars = ["OPENAI_API_KEY", "SERP_API_KEY"]
+    required_vars = ["OPENAI_API_KEY", "SERPER_API_KEY"]
     missing_vars = []
     
     for var in required_vars:
